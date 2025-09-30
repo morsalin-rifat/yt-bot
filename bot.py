@@ -81,7 +81,7 @@ def main():
     if not BOT_TOKEN:
         raise ValueError("❌ BOT_TOKEN not found! Set it in environment variables.")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(8278732792:AAG-bgWJ269JhvpKGOFEoheNW3sXzlflzKc).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
