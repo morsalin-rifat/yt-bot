@@ -3,7 +3,7 @@ import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("8278732792:AAG-bgWJ269JhvpKGOFEoheNW3sXzlflzKc")
 ALLOWED_USER = os.getenv("ALLOWED_USER")  # Optional (তুই নিজের Telegram ID দিয়ে দিতে পারিস)
 
 # ইউজার চেক (যদি ALLOWED_USER সেট করা থাকে)
