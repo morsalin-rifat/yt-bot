@@ -1,156 +1,94 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 import os
-from dotenv import load_dotenv
-from youtubesearchpython import VideosSearch
 import yt_dlp
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
-load_dotenv(dotenv_path="/storage/emulated/0/yt_bot/api.env")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ALLOWED_USER = os.getenv("ALLOWED_USER")  # Optional (তুই নিজের Telegram ID দিয়ে দিতে পারিস)
 
-TOKEN = os.getenv("TOKEN")
-ALLOWED_USER = os.getenv("ALLOWED_USER")
+# ইউজার চেক (যদি ALLOWED_USER সেট করা থাকে)
+def is_allowed(user_id: int) -> bool:
+    if not ALLOWED_USER:
+        return True
+    return str(user_id) == str(ALLOWED_USER)
 
-if ALLOWED_USER is None:
-    print("❌ ALLOWED_USER .env ফাইলে নেই বা ঠিকমতো পড়া যায়নি।")
-    exit()
-
-ALLOWED_USER = int(ALLOWED_USER)
-
-
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER:
-        await update.message.reply_text("❌ এই বট শুধু Owner ব্যবহার করতে পারবেন।")
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("❌ You are not allowed to use this bot.")
         return
-    await update.message.reply_text(
-        "হাই! আমি YouTube Downloader Bot 🤖\n"
-        "ভিডিও সার্চ করতে লিখো:\n"
-        "/search ভিডিও_টাইটেল\n"
-        "ভিডিও ডাউনলোড করতে লিংক পাঠাও।"
-    )
+    await update.message.reply_text("👋 Send me a YouTube link, I will fetch download options!")
 
-
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER:
-        await update.message.reply_text("❌ এই বট শুধু Owner ব্যবহার করতে পারবেন।")
+# ইউটিউব লিংক রিসিভ হলে
+async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
         return
 
-    query = " ".join(context.args)
-    if not query:
-        await update.message.reply_text("❌ দয়া করে ভিডিও নাম লিখুন। উদাহরণ:\n/search python tutorial")
-        return
+    url = update.message.text.strip()
+    await update.message.reply_text("🔎 Fetching formats... Please wait!")
 
-    await update.message.reply_text(f"🔍 Searching for '{query}'...")
-    videosSearch = VideosSearch(query, limit=10)
-    results = videosSearch.result()["result"]
-
-    reply_text = "🔎 Search Results:\n\n"
-    for i, video in enumerate(results[:5], start=1):
-        title = video["title"]
-        channel = video.get("channel", {}).get("name", "N/A")
-        duration = video.get("duration", "N/A")
-        views = video.get("viewCount", {}).get("short", "N/A")
-        link = video.get("link", "N/A")
-        reply_text += f"{i}. 🎬 {title}\n👤 {channel}\n⏱ {duration} | 👀 {views}\n🔗 {link}\n\n"
-
-    keyboard = [[InlineKeyboardButton("More", callback_data=query)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(reply_text, reply_markup=reply_markup)
-
-
-async def more_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query.data
-    await update.callback_query.answer()
-    videosSearch = VideosSearch(query, limit=10)
-    results = videosSearch.result()["result"]
-
-    reply_text = "📜 More Results:\n\n"
-    for i, video in enumerate(results[5:], start=6):
-        title = video["title"]
-        channel = video.get("channel", {}).get("name", "N/A")
-        duration = video.get("duration", "N/A")
-        views = video.get("viewCount", {}).get("short", "N/A")
-        link = video.get("link", "N/A")
-        reply_text += f"{i}. 🎬 {title}\n👤 {channel}\n⏱ {duration} | 👀 {views}\n🔗 {link}\n\n"
-
-    await update.callback_query.message.reply_text(reply_text)
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER:
-        await update.message.reply_text("❌ এই বট শুধু Owner ব্যবহার করতে পারবেন।")
-        return
-
-    url = update.message.text
-    if "youtube.com" not in url and "youtu.be" not in url:
-        await update.message.reply_text("❌ এটি একটি YouTube লিংক নয়।")
-        return
-
-    await update.message.reply_text("📥 লিংক চেক করা হচ্ছে...")
-    ydl_opts = {"listformats": True}
-
+    ydl_opts = {"quiet": True, "no_warnings": True}
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            formats = []
+            buttons = []
+            for f in info["formats"]:
+                if f.get("ext") == "mp4" and f.get("filesize"):
+                    res = f.get("format_note")
+                    size = round(f["filesize"] / (1024 * 1024), 2)
+                    format_id = f["format_id"]
+                    btn_text = f"{res} ({size} MB)"
+                    buttons.append([InlineKeyboardButton(btn_text, callback_data=f"download|{url}|{format_id}")])
+            if not buttons:
+                await update.message.reply_text("❌ No downloadable formats found.")
+                return
+            await update.message.reply_text("🎥 Select resolution:", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-        return
+        await update.message.reply_text(f"⚠️ Error: {e}")
 
-    formats = info.get("formats", [])
-    keyboard = []
-    reply_text = f"🎬 {info.get('title')}\n\nAvailable Formats:\n"
-
-    for fmt in formats:
-        if fmt.get("ext") == "mp4" and fmt.get("height"):
-            format_id = fmt["format_id"]
-            resolution = fmt.get("height")
-            size = fmt.get("filesize") or 0
-            size_mb = size / (1024 * 1024) if size else "N/A"
-            reply_text += f"Resolution: {resolution}p | Size: {size_mb} MB\n"
-            keyboard.append([InlineKeyboardButton(f"{resolution}p", callback_data=f"download|{url}|{format_id}")])
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(reply_text, reply_markup=reply_markup)
-
-
+# বাটন প্রেস করলে
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = update.callback_query.data.split("|")
-    if len(data) != 3:
-        await update.callback_query.answer()
+    query = update.callback_query
+    await query.answer()
+
+    if not is_allowed(query.from_user.id):
+        await query.edit_message_text("❌ You are not allowed to use this bot.")
         return
-    _, url, format_id = data
-    await update.callback_query.answer()
-    await update.callback_query.message.reply_text("⏳ ডাউনলোড শুরু হচ্ছে...")
-
-    download_path = f"/storage/emulated/0/yt_bot/downloaded_video.mp4"
-
-    ydl_opts = {
-        "format": format_id,
-        "outtmpl": download_path,
-        "quiet": True
-    }
 
     try:
+        _, url, format_id = query.data.split("|")
+        await query.edit_message_text("⬇️ Downloading video, please wait...")
+
+        ydl_opts = {
+            "format": format_id,
+            "outtmpl": "video.%(ext)s"
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+
+        # টেলিগ্রামে পাঠানো
+        await query.message.reply_video(video=open(filename, "rb"), caption=f"✅ {info.get('title')}")
+
+        os.remove(filename)  # ফাইল ডিলিট করে দিচ্ছি
+        await query.edit_message_text("✅ Download complete! Video sent.")
     except Exception as e:
-        await update.callback_query.message.reply_text(f"❌ ডাউনলোড এrror: {str(e)}")
-        return
+        await query.edit_message_text(f"⚠️ Download failed: {e}")
 
-    await update.callback_query.message.reply_text("✅ ডাউনলোড শেষ হয়েছে।\nআপনি নীচের ফাইল থেকে ডাউনলোড করতে পারবেন।")
-    await context.bot.send_document(chat_id=update.effective_chat.id, document=open(download_path, "rb"), filename="video.mp4")
-
-
+# Main function
 def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("search", search))
-    app.add_handler(CallbackQueryHandler(more_results, pattern="^.*$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(download_video, pattern=r"download\|"))
-    print("Bot running...")
-    app.run_polling()
+    if not BOT_TOKEN:
+        raise ValueError("❌ BOT_TOKEN not found! Set it in environment variables.")
 
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    app.add_handler(CallbackQueryHandler(download_video, pattern="^download"))
+
+    print("🤖 Bot started...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
